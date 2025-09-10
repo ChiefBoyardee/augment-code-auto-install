@@ -167,7 +167,7 @@ function Install-ScheduledTask {
     }
     
     # Create the action
-    $actionArgs = "index.js"
+    $actionArgs = "index.js --install-all --install-all-profiles"
     $action = New-ScheduledTaskAction -Execute $NodePath -Argument $actionArgs -WorkingDirectory $ScriptDir
     
     # Create the trigger
