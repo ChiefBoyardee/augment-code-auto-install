@@ -1,6 +1,6 @@
 {
   "idePreferences": {
-    "priority": ["cursor", "vscode"],
+    "priority": ["cursor", "vscode", "windsurf", "antigravity"],
     "installInAllIDEs": false,
     "preferredIDE": "auto"
   },

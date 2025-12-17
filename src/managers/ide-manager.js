@@ -21,12 +21,22 @@ class IDEManager {
       vscode: {
         name: 'VS Code',
         commands: {
-          listExtensions: '--list-extensions',
+          listExtensions: '--list-extensions --show-versions',
           installExtension: '--install-extension',
           version: '--version'
         },
         envVar: 'VSCODE_PATH',
         priority: 2
+      },
+      windsurf: {
+        name: 'Windsurf',
+        commands: {
+          listExtensions: '--list-extensions --show-versions',
+          installExtension: '--install-extension',
+          version: '--version'
+        },
+        envVar: 'WINDSURF_PATH',
+        priority: 3
       },
       antigravity: {
         name: 'Antigravity',
@@ -36,14 +46,34 @@ class IDEManager {
           version: '--version'
         },
         envVar: 'ANTIGRAVITY_PATH',
-        priority: 3
+        priority: 4
       }
     };
 
     this.macPaths = {
       cursor: '/Applications/Cursor.app/Contents/Resources/app/bin/cursor',
       vscode: '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code',
+      windsurf: '/Applications/Windsurf.app/Contents/Resources/app/bin/windsurf',
       antigravity: `${process.env.HOME}/.antigravity/antigravity/bin/antigravity`
+    };
+
+    // Windows paths for CLI executables
+    this.windowsPaths = {
+      cursor: [
+        `${process.env.LOCALAPPDATA}\\Programs\\cursor\\resources\\app\\bin\\cursor.cmd`,
+        `${process.env.LOCALAPPDATA}\\cursor\\Cursor.exe`
+      ],
+      vscode: [
+        `${process.env.LOCALAPPDATA}\\Programs\\Microsoft VS Code\\bin\\code.cmd`,
+        'C:\\Program Files\\Microsoft VS Code\\bin\\code.cmd'
+      ],
+      windsurf: [
+        `${process.env.LOCALAPPDATA}\\Programs\\Windsurf\\resources\\app\\bin\\windsurf.cmd`,
+        `${process.env.LOCALAPPDATA}\\windsurf\\Windsurf.exe`
+      ],
+      antigravity: [
+        `${process.env.LOCALAPPDATA}\\Programs\\Antigravity\\resources\\app\\bin\\antigravity.cmd`
+      ]
     };
 
     this.detectedIDEs = [];
@@ -107,9 +137,36 @@ class IDEManager {
     const paths = {
       cursor: path.join(homeDir, '.cursor', 'extensions'),
       vscode: path.join(homeDir, '.vscode', 'extensions'),
+      windsurf: path.join(homeDir, '.windsurf', 'extensions'),
       antigravity: path.join(homeDir, '.antigravity', 'extensions')
     };
     return paths[ide];
+  }
+
+  /**
+   * Extract version from extension folder name
+   * Handles formats like:
+   * - augment.vscode-augment-0.691.0
+   * - augment.vscode-augment-0.658.0-universal
+   * - augment.vscode-augment-0.654.1-universal
+   */
+  extractVersionFromFolderName(folderName, extensionId) {
+    const prefix = `${extensionId}-`;
+    if (!folderName.startsWith(prefix)) {
+      return null;
+    }
+
+    // Remove the prefix to get "0.691.0" or "0.658.0-universal"
+    const remainder = folderName.slice(prefix.length);
+
+    // Extract version using regex - matches semver at the start
+    // Handles: 0.691.0, 0.658.0-universal, 0.654.1-darwin-arm64, etc.
+    const versionMatch = remainder.match(/^(\d+\.\d+\.\d+)/);
+    if (versionMatch) {
+      return versionMatch[1];
+    }
+
+    return null;
   }
 
   async getExtensionVersionFromDir(extensionDir, extensionId) {
@@ -117,21 +174,22 @@ class IDEManager {
       if (fs.existsSync(extensionDir)) {
         const extensions = fs.readdirSync(extensionDir);
         const prefix = `${extensionId}-`;
-        const augmentFolders = extensions.filter(folder => folder.startsWith(prefix));
+        const matchingFolders = extensions.filter(folder => folder.startsWith(prefix));
 
-        if (augmentFolders.length > 0) {
-          const versions = augmentFolders
-            .map(folder => folder.replace(prefix, ''))
-            .filter(v => semver.valid(v))
+        if (matchingFolders.length > 0) {
+          const versions = matchingFolders
+            .map(folder => this.extractVersionFromFolderName(folder, extensionId))
+            .filter(v => v && semver.valid(v))
             .sort((a, b) => semver.rcompare(a, b));
 
           if (versions.length > 0) {
+            this.logger.info(`Found ${matchingFolders.length} extension folder(s), highest version: ${versions[0]}`);
             return versions[0];
           }
         }
       }
     } catch (error) {
-      // Ignore errors
+      this.logger.warn(`Error reading extension directory: ${error.message}`);
     }
     return null;
   }
@@ -141,40 +199,58 @@ class IDEManager {
 
     for (const { ide, config, command } of this.detectedIDEs) {
       let version = null;
+      let detectionMethod = null;
+
       try {
+        // Primary method: Check extension directory (most reliable)
         const extensionDir = this.getExtensionPath(ide);
         if (extensionDir) {
           version = await this.getExtensionVersionFromDir(extensionDir, extensionId);
+          if (version) {
+            detectionMethod = 'directory';
+          }
         }
 
-        if (!version) {
+        // Fallback: Try CLI if directory scan failed
+        // Note: CLI can sometimes report stale versions, so we prefer directory
+        if (!version && command) {
           try {
             const output = execSync(`${command} ${config.commands.listExtensions}`, {
               encoding: 'utf8',
               stdio: ['ignore', 'pipe', 'ignore'],
-              timeout: 10000
+              timeout: 15000
             });
 
-            let match;
-            if (ide === 'cursor' || ide === 'antigravity') {
-              match = output.match(new RegExp(`${extensionId.replace('.', '\\.')}@(\\d+\\.\\d+\\.\\d+)`));
-            } else {
-              if (output.includes(extensionId)) {
-                match = await this.getExtensionVersionFromDir(extensionDir, extensionId);
-                if (!match) match = 'Installed (unknown version)';
+            // All supported IDEs use --show-versions now, try version extraction
+            const versionMatch = output.match(new RegExp(`${extensionId.replace(/\./g, '\\.')}@(\\d+\\.\\d+\\.\\d+)`));
+            if (versionMatch) {
+              const cliVersion = versionMatch[1];
+              // If we already have a version from directory, compare and use the higher one
+              // (CLI sometimes caches old version info)
+              if (version) {
+                if (semver.gt(cliVersion, version)) {
+                  this.logger.warn(`CLI reports newer version ${cliVersion} than directory ${version} - using CLI version`);
+                  version = cliVersion;
+                  detectionMethod = 'cli';
+                }
+              } else {
+                version = cliVersion;
+                detectionMethod = 'cli';
               }
-            }
-
-            if (match) {
-              version = (typeof match === 'string') ? match : match[1];
+            } else if (output.includes(extensionId) && !version) {
+              // Extension is listed but we couldn't get version
+              version = 'Installed (unknown version)';
+              detectionMethod = 'cli-noversion';
             }
           } catch (cliError) {
-            // CLI failed
+            this.logger.warn(`CLI check failed for ${config.name}: ${cliError.message}`);
           }
         }
 
-        if (version) {
-          this.logger.success(`Found in ${config.name}: ${version}`);
+        if (version && semver.valid(version)) {
+          this.logger.success(`Found ${extensionId} in ${config.name}: ${version} (via ${detectionMethod})`);
+        } else if (version) {
+          this.logger.info(`Found ${extensionId} in ${config.name}: ${version}`);
         }
       } catch (error) {
         this.logger.warn(`${config.name} check failed: ${error.message}`);
