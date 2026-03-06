@@ -8,31 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Multi-Profile Support for Cursor IDE**: Automatic detection and installation of extensions to all Cursor profiles
-- **Profile Detection System**: Comprehensive scanning of Cursor profile directories
-- **Direct Extension Copying**: Robust method to copy extensions directly to profile directories when CLI methods fail
-- **Profile Extensions.json Management**: Automatic updating of profile extension registries
-- **Enhanced Logging**: Detailed logging for profile operations and installation status
-- **Profile Installation Testing Tools**: Development utilities for testing profile detection and installation
-- **Configuration Option**: `installInAllProfiles` setting to control multi-profile behavior
+- **Multi-Profile Support for Cursor IDE (opt-in)**: When run with `--install-all-profiles` or `--install-all`, the extension is installed to the default profile then registered in all Cursor profiles via each profile’s `extensions.json`. Default behavior remains single-profile.
+- **Cross-platform profile paths**: Cursor profiles directory is resolved per platform (macOS: `~/Library/Application Support/Cursor/User/profiles/`, Linux: `~/.config/Cursor/User/profiles/`, Windows: `%APPDATA%/Cursor/User/profiles/`).
+- **Profile logic in IDEManager**: All Cursor profile handling lives in `src/managers/ide-manager.js` (getCursorProfilesPath, getCursorProfiles, installExtensionInAllCursorProfiles, updateProfileExtensionsJson).
 
 ### Changed
-- **Windows Task Scheduler**: Updated to use `--install-all --install-all-profiles` flags for comprehensive installation
-- **IDE Manager**: Enhanced `installExtensionInAllIDEs()` method to handle Cursor profiles specifically
-- **Installation Logic**: Improved fallback mechanisms for profile installation failures
-- **Configuration**: Added `installInAllProfiles: true` to default configuration
+- **Path resolution**: Extension location uses `os.homedir()` only; no path traversal from profile path. Location written to `extensions.json` is cross-platform (no hardcoded C: or `/c:/Users/...`).
+- **Version in extensions.json**: Version is derived from the extension folder name via `extractVersionFromFolderName`; no hardcoded fallback version.
+- **installInAllIDEs**: Left at default `false` in config; multi-profile remains opt-in via CLI flags only.
 
 ### Fixed
-- **Cursor Profile Isolation Issue**: Extensions now install to all Cursor profiles, not just the active one
-- **Version Inconsistency**: All profiles now receive the same extension version during updates
-- **Profile Detection**: Robust detection of active vs inactive profiles based on extensions.json presence
+- **Cursor profile isolation**: With `--install-all-profiles`, all Cursor profiles are updated to use the same installed extension.
+- **Windows-only paths**: Profile discovery works on macOS, Linux, and Windows.
 
 ### Technical Details
-- Added `getCursorProfiles()` method for profile discovery
-- Added `copyExtensionToAllProfiles()` method for direct extension copying
-- Added `updateProfileExtensionsJson()` method for profile registry management
-- Added `copyDirectory()` utility for recursive directory copying
-- Enhanced error handling and logging throughout profile operations
+- `getCursorProfilesPath()` returns the Cursor User profiles directory for the current platform.
+- `installExtensionInAllCursorProfiles()` installs once to default, then updates each profile’s `extensions.json` to point at the shared `os.homedir()/.cursor/extensions/` path.
+- `.code-workspace` files are ignored via `.gitignore` and are not committed.
 
 ## [Previous Versions]
 - Initial Windows Task Scheduler implementation

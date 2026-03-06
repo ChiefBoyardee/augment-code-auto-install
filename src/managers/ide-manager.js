@@ -1,5 +1,6 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const semver = require('semver');
 const Logger = require('../utils/logger');
@@ -133,7 +134,7 @@ class IDEManager {
   }
 
   getExtensionPath(ide) {
-    const homeDir = process.env.HOME || process.env.USERPROFILE;
+    const homeDir = os.homedir();
     const paths = {
       cursor: path.join(homeDir, '.cursor', 'extensions'),
       vscode: path.join(homeDir, '.vscode', 'extensions'),
@@ -262,13 +263,186 @@ class IDEManager {
     return results;
   }
 
-  async installExtension(target, vsixPath, isDryRun = false) {
+  /**
+   * Cross-platform path to Cursor User profiles directory.
+   * - macOS: ~/Library/Application Support/Cursor/User/profiles/
+   * - Linux: ~/.config/Cursor/User/profiles/
+   * - Windows: %APPDATA%/Cursor/User/profiles/
+   */
+  getCursorProfilesPath() {
+    const home = os.homedir();
+    if (process.platform === 'darwin') {
+      return path.join(home, 'Library', 'Application Support', 'Cursor', 'User', 'profiles');
+    }
+    if (process.platform === 'win32') {
+      const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+      return path.join(appData, 'Cursor', 'User', 'profiles');
+    }
+    return path.join(home, '.config', 'Cursor', 'User', 'profiles');
+  }
+
+  async getCursorProfiles() {
+    try {
+      const cursorProfilesPath = this.getCursorProfilesPath();
+      if (!fs.existsSync(cursorProfilesPath)) {
+        this.logger.warn('Cursor profiles directory not found');
+        return [];
+      }
+      const profileDirs = fs.readdirSync(cursorProfilesPath, { withFileTypes: true })
+        .filter(dirent => dirent.isDirectory())
+        .map(dirent => dirent.name);
+      const profiles = [];
+      for (const profileDir of profileDirs) {
+        const profilePath = path.join(cursorProfilesPath, profileDir);
+        const extensionsJsonPath = path.join(profilePath, 'extensions.json');
+        if (fs.existsSync(extensionsJsonPath)) {
+          profiles.push({
+            name: profileDir,
+            path: profilePath
+          });
+        }
+      }
+      return profiles;
+    } catch (error) {
+      this.logger.error(`Error getting Cursor profiles: ${error.message}`);
+      return [];
+    }
+  }
+
+  profileHasAugment(extensionsJsonPath) {
+    try {
+      return fs.readFileSync(extensionsJsonPath, 'utf8').includes('augment.vscode-augment');
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Extension directory is under os.homedir() so all profiles share one copy.
+   * We only update each profile's extensions.json to point at that path.
+   */
+  async installExtensionInAllCursorProfiles(vsixPath, target, isDryRun) {
     const { config, command } = target;
+    if (isDryRun) {
+      this.logger.warn('DRY RUN: Would install in all Cursor profiles');
+      return true;
+    }
+    try {
+      const profiles = await this.getCursorProfiles();
+      if (profiles.length === 0) {
+        this.logger.warn('No Cursor profiles found, installing to default profile only');
+        execSync(`${command} ${config.commands.installExtension} "${vsixPath}"`, {
+          stdio: 'inherit',
+          timeout: 60000,
+          env: { ...process.env, DISPLAY: process.env.DISPLAY || ':0' }
+        });
+        this.logger.success(`Installed in ${config.name} (default profile)`);
+        return true;
+      }
+      this.logger.info(`Found ${profiles.length} Cursor profile(s), installing to all...`);
+      execSync(`${command} ${config.commands.installExtension} "${vsixPath}"`, {
+        stdio: 'inherit',
+        timeout: 60000,
+        env: { ...process.env, DISPLAY: process.env.DISPLAY || ':0' }
+      });
+      this.logger.success('Installed in Cursor default profile');
+      const defaultExtensionsPath = path.join(os.homedir(), '.cursor', 'extensions');
+      if (!fs.existsSync(defaultExtensionsPath)) {
+        this.logger.error('Default extensions directory not found');
+        return false;
+      }
+      const extensionDirs = fs.readdirSync(defaultExtensionsPath)
+        .filter(dir => dir.startsWith('augment.vscode-augment-'));
+      if (extensionDirs.length === 0) {
+        this.logger.error('Augment extension not found in default extensions directory');
+        return false;
+      }
+      const latestExtensionDir = extensionDirs.sort().pop();
+      this.logger.info(`Registering Augment extension in all profiles: ${latestExtensionDir}`);
+      for (const profile of profiles) {
+        try {
+          await this.updateProfileExtensionsJson(profile, latestExtensionDir);
+          this.logger.success(`Registered in profile: ${profile.name}`);
+        } catch (error) {
+          this.logger.error(`Failed to update profile ${profile.name}: ${error.message}`);
+        }
+      }
+      return true;
+    } catch (error) {
+      this.logger.error(`Error installing in all Cursor profiles: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Build a cross-platform file path for extensions.json location.
+   * Cursor expects path with forward slashes; on Windows uses /c:/ style.
+   */
+  extensionLocationPath(extensionDirName) {
+    const absPath = path.join(os.homedir(), '.cursor', 'extensions', extensionDirName);
+    if (process.platform === 'win32') {
+      return '/' + absPath.replace(/\\/g, '/');
+    }
+    return absPath;
+  }
+
+  async updateProfileExtensionsJson(profile, extensionDirName) {
+    const extensionsJsonPath = path.join(profile.path, 'extensions.json');
+    if (!fs.existsSync(extensionsJsonPath)) {
+      fs.writeFileSync(extensionsJsonPath, JSON.stringify([], null, 2));
+      return;
+    }
+    const extensionsData = JSON.parse(fs.readFileSync(extensionsJsonPath, 'utf8'));
+    const filteredExtensions = extensionsData.filter(ext =>
+      !ext.identifier?.id?.includes('augment.vscode-augment')
+    );
+    const version = this.extractVersionFromFolderName(extensionDirName, 'augment.vscode-augment') || '0.0.0';
+    const newExtensionEntry = {
+      identifier: {
+        id: 'augment.vscode-augment',
+        uuid: 'fc0e137d-e132-47ed-9455-c4636fa5b897'
+      },
+      version,
+      location: {
+        $mid: 1,
+        path: this.extensionLocationPath(extensionDirName),
+        scheme: 'file'
+      },
+      relativeLocation: extensionDirName,
+      metadata: {
+        isApplicationScoped: false,
+        isMachineScoped: false,
+        isBuiltin: false,
+        installedTimestamp: Date.now(),
+        pinned: false,
+        source: 'gallery',
+        id: 'fc0e137d-e132-47ed-9455-c4636fa5b897',
+        publisherId: '7814b14b-491a-4e83-83ac-9222fa835050',
+        publisherDisplayName: 'augment',
+        targetPlatform: 'undefined',
+        updated: true,
+        private: false,
+        isPreReleaseVersion: true,
+        hasPreReleaseVersion: true,
+        preRelease: true
+      }
+    };
+    filteredExtensions.push(newExtensionEntry);
+    fs.writeFileSync(extensionsJsonPath, JSON.stringify(filteredExtensions, null, 2));
+  }
+
+  async installExtension(target, vsixPath, isDryRun = false) {
+    const { ide, config, command } = target;
     this.logger.info(`Installing extension in ${config.name}...`);
 
     if (isDryRun) {
       this.logger.warn(`DRY RUN: Would install in ${config.name}`);
       return true;
+    }
+
+    const installInAllProfiles = process.argv.includes('--install-all-profiles') || process.argv.includes('--install-all');
+    if (ide === 'cursor' && installInAllProfiles) {
+      return this.installExtensionInAllCursorProfiles(vsixPath, target, isDryRun);
     }
 
     try {
