@@ -1,7 +1,7 @@
 {
   "name": "ai-code-updater",
   "version": "2.0.0",
-  "description": "Automated updater for AI coding tools: Augment (VS Code extension), Claude Code CLI, and Gemini CLI",
+  "description": "DEPRECATED: Augment sunset its VS Code/Cursor extension. Do not use this updater for Augment.",
   "main": "index.js",
   "bin": {
     "ai-code-updater": "./index.js",
@@ -23,7 +23,18 @@
   "engines": {
     "node": ">=14.0.0"
   },
-  "keywords": ["cursor", "vscode", "extension", "automation", "augment", "claude-code", "gemini-cli", "ai", "coding-assistant"],
+  "keywords": [
+    "deprecated",
+    "cursor",
+    "vscode",
+    "extension",
+    "automation",
+    "augment",
+    "claude-code",
+    "gemini-cli",
+    "ai",
+    "coding-assistant"
+  ],
   "author": "Brandon Charleson",
   "license": "MIT"
 } 

@@ -1,6 +1,17 @@
 # AI Code Tools Updater
 
+> [!CAUTION]
+> **This project is deprecated and no longer maintained.**
+>
+> [Augment Code](https://www.augmentcode.com/) has sunset its Visual Studio Code / Cursor IDE extension in favor of its cloud platform (including the [Auggie CLI](https://www.npmjs.com/package/@augmentcode/auggie) and related cloud tooling). This repository existed primarily to auto-install and update that extension, so it is no longer useful for that purpose.
+>
+> **Do not install** the Windows scheduled task, cron job, or global `acu` / `ai-code-updater` package. If you already installed them, uninstall as described in [Uninstall](#uninstall-deprecated-install) below.
+>
+> For Augment going forward, use their current cloud / CLI offerings (for example `npm install -g @augmentcode/auggie`), not this updater.
+
 A unified updater for AI coding tools - manage updates for **Augment**, **Claude Code**, **Gemini CLI**, and **OpenAI Codex** from one place.
+
+**Status:** Deprecated (see notice above).
 
 ## Supported Tools
 
@@ -62,6 +73,49 @@ npm uninstall -g ai-code-updater
 # or if you used npm link:
 npm unlink ai-code-updater
 ```
+
+## Uninstall (deprecated install)
+
+If you previously installed this project’s automation:
+
+### Windows scheduled task
+
+```powershell
+# From the project directory (may require Administrator)
+npm run uninstall-task
+# or:
+powershell -ExecutionPolicy Bypass -File .\Uninstall-WindowsTask.ps1 -Force
+```
+
+Or remove the task manually:
+
+```powershell
+Unregister-ScheduledTask -TaskName "AugmentMonitor" -Confirm:$false
+```
+
+### macOS / Linux cron
+
+Remove any crontab entries that run `index.js`, `acu`, or `ai-code-updater` from this project.
+
+### Global npm package
+
+```bash
+npm uninstall -g ai-code-updater
+# or if you used npm link:
+npm unlink -g ai-code-updater
+```
+
+### Augment IDE extension (optional)
+
+If the extension is still installed in Cursor/VS Code and you no longer need it:
+
+```bash
+cursor --uninstall-extension augment.vscode-augment
+# or
+code --uninstall-extension augment.vscode-augment
+```
+
+For Augment itself, use their current cloud/CLI path (e.g. `@augmentcode/auggie`), not this repository.
 
 ## Command Line Options
 

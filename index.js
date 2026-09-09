@@ -629,6 +629,11 @@ process.on('unhandledRejection', (reason) => {
 
 // Run the updater
 if (require.main === module) {
+  console.error(chalk.yellow.bold('\n⚠ DEPRECATED: This project is no longer maintained.'));
+  console.error(chalk.yellow(
+    'Augment Code has sunset its VS Code/Cursor extension in favor of cloud/CLI tooling (e.g. @augmentcode/auggie).\n' +
+    'This updater should not be used to install or update Augment. See README.md for uninstall steps.\n'
+  ));
   const updater = new AICodeUpdater();
   updater.run();
 }
